@@ -4,9 +4,7 @@ import com.game.controller.PlayerOrder;
 import com.game.entity.Profession;
 import com.game.entity.Race;
 
-// for filtering
 public class FilterDto {
-    // Pattern Builder
     private String name;
     private String title;
     private Race race;

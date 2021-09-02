@@ -1,6 +1,6 @@
 package com.game.controller;
 
-public enum     PlayerOrder {
+public enum PlayerOrder {
     ID("id"), // default
     NAME("name"),
     EXPERIENCE("experience"),

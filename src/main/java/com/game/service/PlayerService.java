@@ -1,9 +1,11 @@
 package com.game.service;
 
+import com.game.controller.PlayerOrder;
 import com.game.dto.FilterDto;
 import com.game.dto.PlayerDto;
 import com.game.entity.Player;
-import com.game.exception.NoSuchPlayerException;
+import com.game.entity.Profession;
+import com.game.entity.Race;
 import com.game.repository.PlayerRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.*;
@@ -19,36 +21,12 @@ import java.util.List;
 public class PlayerService {
     private final PlayerRepository playerRepository;
     private final PlayerValidationService playerValidationService;
-
-    @Autowired
-    public PlayerService(PlayerRepository playerRepository, PlayerValidationService playerValidationService) {
-        this.playerRepository = playerRepository;
-        this.playerValidationService = playerValidationService;
-    }
-
-    //  == Get players count ==
-    public Long playersCount() {
-        return playerRepository.count();
-    }
-
-    // == Get player ==
-    public Player findById(Long id) {
-        return playerRepository.findById(id).orElseThrow(NoSuchPlayerException::new);
-    }
-
-    // == Create player ==
-    public Player createPlayer(PlayerDto playerDto) {
-        Player player = new Player();
-        return playerRepository.save(mapDtoToEntity(player, playerDto));
-    }
-
-    // == Get players page ==
-    public Page<Player> getListPlayers(FilterDto filterDto) {
-        Pageable pageable = PageRequest.of(filterDto.getPageNumber(), filterDto.getPageSize());
-
-        Page<Player> page = playerRepository.findAll((Specification<Player>) (root, query, criteriaBuilder) -> {
-
+    private FilterDto filterDto;
+    private Specification<Player> specification = new Specification<Player>() {
+        @Override
+        public Predicate toPredicate(Root<Player> root, CriteriaQuery<?> query, CriteriaBuilder criteriaBuilder) {
             List<Predicate> predicates = new ArrayList<>();
+
             if (filterDto.getName() != null) {
                 predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("name")), "%" + filterDto.getName().toLowerCase() + "%"));
             }
@@ -63,16 +41,19 @@ public class PlayerService {
             }
             if (filterDto.getMinExperience() < filterDto.getMaxExperience()) {
                 predicates.add(criteriaBuilder.between(root.get("experience"), filterDto.getMinExperience(), filterDto.getMaxExperience()));
+            } else if (filterDto.getMinExperience() != 0 && filterDto.getMaxExperience() == 0) {
+                predicates.add(criteriaBuilder.greaterThanOrEqualTo(root.get("experience"), filterDto.getMinExperience()));
+            } else if (filterDto.getMinExperience() == 0 && filterDto.getMaxExperience() != 0) {
+                predicates.add(criteriaBuilder.lessThanOrEqualTo(root.get("experience"), filterDto.getMaxExperience()));
             }
 
             Date before = new Date(filterDto.getBefore());
             Date after = new Date(filterDto.getAfter());
             if (filterDto.getAfter() != 0 && filterDto.getBefore() != 0 && filterDto.getAfter() < filterDto.getBefore()) {
                 predicates.add(criteriaBuilder.between(root.get("birthday"), after, before));
-            } else if (filterDto.getAfter() != 0 && filterDto.getBefore() == 0 ){
+            } else if (filterDto.getAfter() != 0 && filterDto.getBefore() == 0) {
                 predicates.add(criteriaBuilder.greaterThanOrEqualTo(root.get("birthday"), after));
-
-            } else if (filterDto.getAfter() == 0 && filterDto.getBefore() != 0 ){
+            } else if (filterDto.getAfter() == 0 && filterDto.getBefore() != 0) {
                 predicates.add(criteriaBuilder.lessThanOrEqualTo(root.get("birthday"), before));
             }
 
@@ -80,17 +61,58 @@ public class PlayerService {
                 predicates.add(criteriaBuilder.equal(root.get("banned"), filterDto.getBanned()));
             }
 
-            if (filterDto.getMinLevel() >= 0 && filterDto.getMaxLevel() > 0 && filterDto.getMinLevel() < filterDto.getMaxLevel()) {
+            if (filterDto.getMinLevel() != 0 && filterDto.getMaxLevel() != 0 && filterDto.getMinLevel() < filterDto.getMaxLevel()) {
                 predicates.add(criteriaBuilder.between(root.get("level"), filterDto.getMinLevel(), filterDto.getMaxLevel()));
+            } else if (filterDto.getMinLevel() != 0 && filterDto.getMaxLevel() == 0) {
+                predicates.add(criteriaBuilder.greaterThanOrEqualTo(root.get("level"), filterDto.getMinLevel()));
+            } else if (filterDto.getMinLevel() == 0 && filterDto.getMaxLevel() != 0) {
+                predicates.add(criteriaBuilder.lessThanOrEqualTo(root.get("level"), filterDto.getMaxLevel()));
             }
 
             orderBy(filterDto, root, criteriaBuilder, query);
 
             return criteriaBuilder.and(predicates.toArray(new Predicate[predicates.size()]));
-        }, pageable);
+        }
+    };
 
-        page.getTotalElements();
-        page.getTotalPages();
+    @Autowired
+    public PlayerService(PlayerRepository playerRepository, PlayerValidationService playerValidationService) {
+        this.playerRepository = playerRepository;
+        this.playerValidationService = playerValidationService;
+    }
+
+    private void setFilterDto(FilterDto filterDto) {
+        this.filterDto = filterDto;
+    }
+
+    //  == Get players count ==
+    public int playersCount(FilterDto filterDto) {
+        setFilterDto(filterDto);
+        if (filterDto == null) {
+            return Math.toIntExact(playerRepository.count());
+        }
+        return Math.toIntExact(playerRepository.count(specification));
+    }
+
+    // == Get player ==
+    public Player findById(Long id) {
+        return playerRepository.findById(id).get();
+    }
+
+    // == Create player ==
+    public Player createPlayer(PlayerDto playerDto) {
+        Player player = new Player();
+        return playerRepository.save(mapDtoToEntity(player, playerDto));
+    }
+
+    // == Get players page ==
+    public Page<Player> getListPlayers(FilterDto filterDto) {
+        setFilterDto(filterDto);
+
+        Pageable pageable = PageRequest.of(filterDto.getPageNumber(), filterDto.getPageSize());
+
+        Page<Player> page = playerRepository.findAll(specification, pageable);
+
         return page;
     }
 
@@ -115,20 +137,26 @@ public class PlayerService {
         if (playerDto.getProfession() != null) {
             player.setProfession(playerDto.getProfession());
         }
-        if (playerDto.getBirthday() != null && playerValidationService.isBirthdayValid(playerDto)) {
-            player.setBirthday(playerDto.getBirthday());
+
+        if (playerDto.getBirthday() != null) {
+            playerValidationService.validateBirthday(playerDto);
+            player.setBirthday(new Date(playerDto.getBirthday()));
         }
+
         if (playerDto.getBanned() != null) {
             player.setBanned(playerDto.getBanned());
         }
-        if (playerDto.getExperience() != null && playerValidationService.isExperienceValid(playerDto)) {
-            player.setExperience(playerDto.getExperience());
-        }
-        int level = levelCalculations(playerDto);
-        player.setLevel(level);
-        int untilNextLevel = untilNextLevelCalculations(playerDto, level);
-        player.setUntilNextLevel(untilNextLevel);
 
+        if (playerDto.getExperience() != null) {
+            playerValidationService.validateExperience(playerDto);
+            player.setExperience(playerDto.getExperience());
+
+            int level = levelCalculations(playerDto);
+            player.setLevel(level);
+
+            int untilNextLevel = untilNextLevelCalculations(playerDto, level);
+            player.setUntilNextLevel(untilNextLevel);
+        }
         return playerRepository.saveAndFlush(player);
     }
 
@@ -137,7 +165,7 @@ public class PlayerService {
         player.setTitle(playerDto.getTitle());
         player.setRace(playerDto.getRace());
         player.setProfession(playerDto.getProfession());
-        player.setBirthday(playerDto.getBirthday());
+        player.setBirthday(new Date(playerDto.getBirthday()));
         player.setBanned(playerDto.getBanned());
         player.setExperience(playerDto.getExperience());
 
@@ -146,26 +174,6 @@ public class PlayerService {
         player.setUntilNextLevel(untilNextLevelCalculations(playerDto, level));
 
         return player;
-    }
-
-    private PlayerDto mapEntityToDto(Player player) {
-        PlayerDto playerDto = new PlayerDto();
-
-        playerDto.setName(player.getName());
-        playerDto.setTitle(player.getTitle());
-        playerDto.setRace(player.getRace());
-        playerDto.setProfession(player.getProfession());
-        playerDto.setBirthday(player.getBirthday());
-        playerDto.setBanned(player.getBanned());
-        playerDto.setExperience(player.getExperience());
-        playerDto.setLevel(player.getLevel());
-        playerDto.setUntilNextLevel(player.getUntilNextLevel());
-
-        return playerDto;
-    }
-
-    public boolean isIdValid(Long id) {
-        return (id > 0 || id <= playersCount());
     }
 
     private Integer levelCalculations(PlayerDto playerDto) {
@@ -198,6 +206,40 @@ public class PlayerService {
                 break;
         }
         query.orderBy(order);
+    }
+
+    public FilterDto mapRequestParamToFilterDto(
+            String name,
+            String title,
+            Race race,
+            Profession profession,
+            Long after,
+            Long before,
+            Boolean banned,
+            Integer minExperience,
+            Integer maxExperience,
+            Integer minLevel,
+            Integer maxLevel,
+            PlayerOrder order,
+            Integer pageSize,
+            Integer pageNumber
+    ) {
+        FilterDto filterDto = new FilterDto();
+        filterDto.setName(name);
+        filterDto.setTitle(title);
+        filterDto.setRace(race);
+        filterDto.setProfession(profession);
+        filterDto.setAfter(after);
+        filterDto.setBefore(before);
+        filterDto.setBanned(banned);
+        filterDto.setMinExperience(minExperience);
+        filterDto.setMaxExperience(maxExperience);
+        filterDto.setMinLevel(minLevel);
+        filterDto.setMaxLevel(maxLevel);
+        filterDto.setOrder(order);
+        filterDto.setPageSize(pageSize);
+        filterDto.setPageNumber(pageNumber);
+        return filterDto;
     }
 }
 

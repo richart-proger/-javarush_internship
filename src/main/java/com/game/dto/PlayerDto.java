@@ -10,7 +10,7 @@ public class PlayerDto {
     private String title;
     private Race race;
     private Profession profession;
-    private Date birthday;
+    private Long birthday;
     private Boolean banned;
     private Integer experience;
     private Integer level;
@@ -52,11 +52,11 @@ public class PlayerDto {
         this.profession = profession;
     }
 
-    public Date getBirthday() {
+    public Long getBirthday() {
         return birthday;
     }
 
-    public void setBirthday(Date birthday) {
+    public void setBirthday(Long birthday) {
         this.birthday = birthday;
     }
 

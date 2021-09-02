@@ -1,7 +1,11 @@
 package com.game.service;
 
 import com.game.dto.PlayerDto;
+import com.game.exception.InvalidIdException;
+import com.game.exception.NoSuchPlayerException;
 import com.game.exception.ValidationException;
+import com.game.repository.PlayerRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -9,8 +13,14 @@ import java.time.ZoneId;
 import java.util.Date;
 
 @Service
-
 public class PlayerValidationService {
+    private final PlayerRepository playerRepository;
+
+    @Autowired
+    public PlayerValidationService(PlayerRepository playerRepository) {
+        this.playerRepository = playerRepository;
+    }
+
     /**
      * @param playerDto
      * @return true if dto is valid
@@ -75,10 +85,33 @@ public class PlayerValidationService {
      * @return returns true if birthday is valid
      */
     boolean isBirthdayValid(PlayerDto playerDto) {
-        Date date = playerDto.getBirthday();
+        if (playerDto.getBirthday() < 0) {
+            return false;
+        }
+        Date date = new Date(playerDto.getBirthday());
         LocalDate localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
         int year = localDate.getYear();
 
-        return playerDto.getBirthday().getTime() >= 0 && (year >= 2000 && year <= 3000);
+        return date.getTime() >= 0 && (year >= 2000 && year <= 3000);
+    }
+
+    public void validateId(Long id) {
+        if (id <= 0) {
+            throw new InvalidIdException();
+        } else if (id > playerRepository.count() || !playerRepository.findById(id).isPresent()) {
+            throw new NoSuchPlayerException();
+        }
+    }
+
+    void validateBirthday(PlayerDto playerDto) {
+        if (!isBirthdayValid(playerDto)) {
+            throw new ValidationException();
+        }
+    }
+
+    void validateExperience(PlayerDto playerDto) {
+        if (!isExperienceValid(playerDto)) {
+            throw new ValidationException();
+        }
     }
 }
